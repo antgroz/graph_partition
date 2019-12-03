@@ -5,7 +5,6 @@ from sklearn.cluster import KMeans, SpectralClustering
 import matplotlib.pyplot as plt
 import sys
 import numpy as np
-import cupy as cp
 
 
 def gen_matrix(file_name, mode='A'):
@@ -31,26 +30,6 @@ def gen_matrix(file_name, mode='A'):
     col = []
 
     # Starting the cycle to read the file
-    # while True:
-    #     edge_str = txt.readline()
-    #     if len(edge_str) == 0:
-    #         print('Input file read')
-    #         break
-    #     else:
-    #         edges_cnt += 1
-    #         edge = [int(x) for x in edge_str.rstrip().split(' ')]
-    #         if edge[0] != edge[1]:
-    #             row.extend(edge)
-    #             col.extend(edge[::-1])
-    #             data.extend([1, 1])
-    #             if mode == 'UNL' or mode == 'NL':
-    #                 row.extend(edge)
-    #                 col.extend(edge)
-    #                 data.extend([1, 1])
-
-    A = cp.ndarray((vertices_n, vertices_n), dtype=cp.float64)
-
-    # Reading the file into a CuPy array
     while True:
         edge_str = txt.readline()
         if len(edge_str) == 0:
@@ -59,28 +38,27 @@ def gen_matrix(file_name, mode='A'):
         else:
             edges_cnt += 1
             edge = [int(x) for x in edge_str.rstrip().split(' ')]
-            if edge[0] != edge[1] and A[edge[0], edge[1]] != 1:
-                A[edge[0], edge[1]] = 1
-                A[edge[1], edge[0]] = 1
-                if mode == 'UNL':
-                    A[edge[0], edge[0]] += 1
-                    A[edge[1], edge[1]] += 1
+            if edge[0] != edge[1]:
+                row.extend(edge)
+                col.extend(edge[::-1])
+                data.extend([1, 1])
+                if mode == 'UNL' or mode == 'NL':
+                    row.extend(edge)
+                    col.extend(edge)
+                    data.extend([1, 1])
 
     # Checking that data was read correctly
     if edges_cnt != edges_n:
         sys.exit('Error: counted number of edges is different from the specified number')
 
     # Transforming the matrix into an arithmetic-friendly format
-    # A = coo_matrix((data, (row, col)), shape=(vertices_n, vertices_n), dtype=np.float64)
-    # # A = csr_matrix(A)
-    # A = cp.ndarray(A)
+    A = coo_matrix((data, (row, col)), shape=(vertices_n, vertices_n), dtype=np.float64)
+    A = csr_matrix(A)
 
     # Normalizing the Laplacian for NL
     if mode == 'NL':
         D = csr_matrix(diags(A.diagonal()**(-1/2)), dtype=np.float64)
         A = D*A*D
-        for vertex in range(vertices_n):
-            A[vertex, vertex] = 1.0
 
     print('Matrix constructed')
     return A, clusters_n
@@ -98,13 +76,16 @@ def phi(sparse, labels, k):
 
 
 if __name__ == '__main__':
-    matrix, k = gen_matrix('ca-GrQc.txt', mode='A')
-    # w, v = eigsh(matrix, 4, sigma=0, which='LM', return_eigenvectors=True)
-    # labels = MiniBatchKMeans(n_clusters=k).fit_predict(v)
+    matrix, k = gen_matrix('./graphs_processed/soc-Epinions1.txt', mode='NL')
+    w, v = eigsh(matrix, k-1, sigma=0, which='LM', return_eigenvectors=True)
+    print('Eigenpairs calculated')
+
+    labels = KMeans(n_clusters=k, max_iter=1000, n_jobs=-1).fit_predict(v)
     # labels = KMeans(n_clusters=k).fit_predict(v)
-    sc = SpectralClustering(k, affinity='precomputed', n_init=500, assign_labels='discretize')
-    labels = sc.fit_predict(matrix)
-    print(phi(matrix, labels, k))
+    # labels = sc.fit_predict(matrix)
+    print('Clustering finished')
+
+    print('Phi function: {}'.format(phi(matrix, labels, k)))
 
     sorted_vert = [vert for label, vert in sorted(zip(labels, list(range(matrix.get_shape()[0]))))]
     matrix = matrix[:, sorted_vert][sorted_vert]
