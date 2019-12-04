@@ -105,7 +105,7 @@ if __name__ == '__main__':
     param = float(sys.argv[2])
     matrix, k, header, edges, adjacency = gen_matrix('./graphs_processed/{}.txt'.format(graph_name), mode='UNL', adj=True)
     n = matrix.get_shape()[0]
-    w, v = eigsh(matrix, param*k, sigma=0, which='LM', return_eigenvectors=True, maxiter=1000*n, ncv=100*n, tol=1e-4)
+    w, v = eigsh(matrix, int(param*k), sigma=0, which='LM', return_eigenvectors=True, tol=1e-4)
     print('Eigenpairs found')
 
     labels = KMeans(n_clusters=k, n_jobs=-1).fit_predict(v)
@@ -114,7 +114,7 @@ if __name__ == '__main__':
     print('Clustering finished')
 
     # Writing the results
-    output(header, graph_name, n, labels, param*k)
+    output(header, graph_name, n, labels, int(param*k))
     print('Results recorded')
 
     print('Phi function: {}'.format(phi(edges, labels, k)))
