@@ -1,13 +1,14 @@
 from scipy.sparse import coo_matrix, csr_matrix, csc_matrix, diags
-from scipy.sparse.linalg import eigsh
+from scipy.sparse.linalg import eigsh, lobpcg
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.cluster import KMeans, SpectralClustering
 import matplotlib.pyplot as plt
 import sys
 import numpy as np
+import pyamg
 
 
-def gen_matrix(file_name, mode='A'):
+def gen_matrix(file_name, mode='A', adj=False):
 
     # Checking input parameters
     if mode not in ['A', 'UNL', 'NL']:
@@ -17,8 +18,8 @@ def gen_matrix(file_name, mode='A'):
     txt = open(file_name, 'r', encoding='utf-8')
 
     # Reading the header in the first line and extracting parameters
-    header = txt.readline()
-    header = header.rstrip().split(' ')
+    header_str = txt.readline()
+    header = header_str.rstrip().split(' ')
     vertices_n = int(header[2])
     edges_n = int(header[3])
     clusters_n = int(header[4])
@@ -28,6 +29,7 @@ def gen_matrix(file_name, mode='A'):
     data = []
     row = []
     col = []
+    base = 1 if mode == 'A' else -1
 
     # Starting the cycle to read the file
     while True:
@@ -41,8 +43,8 @@ def gen_matrix(file_name, mode='A'):
             if edge[0] != edge[1]:
                 row.extend(edge)
                 col.extend(edge[::-1])
-                data.extend([1, 1])
-                if mode == 'UNL' or mode == 'NL':
+                data.extend([base, base])
+                if mode != 'A':
                     row.extend(edge)
                     col.extend(edge)
                     data.extend([1, 1])
@@ -55,13 +57,21 @@ def gen_matrix(file_name, mode='A'):
     A = coo_matrix((data, (row, col)), shape=(vertices_n, vertices_n), dtype=np.float64)
     A = csr_matrix(A)
 
+    # Getting the adjacency matrix
+    if mode != 'A' and adj is True:
+        adjacency = -A
+        adjacency.setdiag(0)
+
     # Normalizing the Laplacian for NL
     if mode == 'NL':
         D = csr_matrix(diags(A.diagonal()**(-1/2)), dtype=np.float64)
         A = D*A*D
 
     print('Matrix constructed')
-    return A, clusters_n
+    if mode != 'A' and adj is True:
+        return A, clusters_n, header_str, adjacency
+    else:
+        return A, clusters_n, header_str
 
 
 def phi(sparse, labels, k):
@@ -75,22 +85,33 @@ def phi(sparse, labels, k):
     return collector
 
 
-if __name__ == '__main__':
-    matrix, k = gen_matrix('./graphs_processed/soc-Epinions1.txt', mode='NL')
-    w, v = eigsh(matrix, k-1, sigma=0, which='LM', return_eigenvectors=True)
-    print('Eigenpairs calculated')
+def output(header, graph_name, vertices_n, labels):
+    with open('{}.output'.format(graph_name), 'w', encoding='utf-8') as f:
+        f.write(header)
+        for i in range(vertices_n):
+            f.write('{} {}\n'.format(i, labels[i]))
 
-    labels = KMeans(n_clusters=k, max_iter=1000, n_jobs=-1).fit_predict(v)
+
+if __name__ == '__main__':
+    graph_name = 'roadNet-CA'
+    matrix, k, header, adjacency = gen_matrix('./graphs_processed/{}.txt'.format(graph_name), mode='UNL', adj=True)
+    w, v = eigsh(matrix, k, sigma=0, which='LM', return_eigenvectors=True)
+
+    labels = KMeans(n_clusters=k, n_jobs=-1).fit_predict(v)
     # labels = KMeans(n_clusters=k).fit_predict(v)
     # labels = sc.fit_predict(matrix)
     print('Clustering finished')
 
-    print('Phi function: {}'.format(phi(matrix, labels, k)))
+    print('Phi function: {}'.format(phi(adjacency, labels, k)))
 
-    sorted_vert = [vert for label, vert in sorted(zip(labels, list(range(matrix.get_shape()[0]))))]
-    matrix = matrix[:, sorted_vert][sorted_vert]
-    matrix.setdiag(0)
+    # Writing the results
+    output(header, graph_name, matrix.get_shape()[0], labels)
+    print('Results recorded')
+
+    sorted_vert = [vert for label, vert in sorted(zip(labels, list(range(adjacency.get_shape()[0]))))]
+    adjacency = adjacency[:, sorted_vert][sorted_vert]
+    adjacency.setdiag(0)
     ax = plt.gca()
     ax.set_facecolor((0, 0, 0))
-    plt.spy(matrix, markersize=1, color=(0, 1, 0))
+    plt.spy(adjacency, markersize=1, color=(0, 1, 0))
     plt.show()
